@@ -48,14 +48,14 @@ class enrol_autoenrol_plugin extends enrol_plugin {
      * expirethreshold => How many minutes before expire need to send notify
      * enrolstartdate => When start to enrol
      * enrolenddate => When stop to enrol
-     * customint1 => Enrol on course access, on login or with user confirmation
+     * customint1 => Enrol on course access (0), on login (1) or with user confirmation (2)
      * customint2 => -- NOT USED -- Old group field filter
-     * customint3 => Longtime no see unenrol
-     * customint4 => New enrolment enabled
-     * customint5 => Enrolment Limit number
-     * customint6 => Enable self unenrol
-     * customint7 => Welcome message enabled
-     * customint8 => Always enrol
+     * customint3 => Longtime no see unenrol (in seconds)
+     * customint4 => New enrolment enabled (0-No, 1-Yes)
+     * customint5 => Enrolment Limit number of paticipants
+     * customint6 => Enable self unenrol  (0-No, 1-Yes)
+     * customint7 => Welcome message enabled  (0-No, 1-Yes)
+     * customint8 => Auto enrol already enrolled user with other methods (0-No, 1-Yes)
      * customchar1 => Group Name
      * customchar2 => -- NOT USED --
      * customchar3 => Group by field name
@@ -166,6 +166,33 @@ class enrol_autoenrol_plugin extends enrol_plugin {
         $instanceinfo->status = $this->enrol_allowed($instance, $USER);
 
         return $instanceinfo;
+    }
+
+    /**
+     * Attempt to automatically enrol current user in course without any interaction,
+     * calling code has to make sure the plugin and instance are active.
+     *
+     * This should return either a timestamp in the future or false.
+     *
+     * @param stdClass $instance course enrol instance
+     *
+     * @return bool|int false means not enrolled, integer means timeend
+     */
+    public function try_autoenrol(stdClass $instance) {
+        global $USER;
+
+	if (!defined('ENROL_DO_NOT_SEND_EMAIL')) {
+            define('ENROL_DO_NOT_SEND_EMAIL', 0);
+        }
+
+	// We can not send email from here so not autoenrol if welcome message is enabled.
+        if ($instance->customint7 == ENROL_DO_NOT_SEND_EMAIL) {
+            if ($this->user_autoenrol($instance, $USER)) {
+                return 0;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -311,11 +338,11 @@ class enrol_autoenrol_plugin extends enrol_plugin {
             $url = new moodle_url('/enrol/editenrolment.php', $params);
             $actions[] = new user_enrolment_action(
                     new pix_icon('t/edit', ''), get_string('editenrolment', 'enrol'), $url,
-                    array(
+                    [
                       'class' => 'editenrollink',
                       'rel' => $ue->id,
-                      'data-action' => ENROL_ACTION_EDIT
-                    ));
+                      'data-action' => ENROL_ACTION_EDIT,
+                    ]);
         }
         if ($this->allow_unenrol_user($instance, $ue) && has_capability('enrol/autoenrol:unenrol', $context)) {
             $url = new moodle_url('/enrol/unenroluser.php', $params);
@@ -431,7 +458,18 @@ class enrol_autoenrol_plugin extends enrol_plugin {
                         }
                     }
                 } else {
-                    // If rule is verified update user group enrolments.
+                    // If rule is verified check for suspended enrolments.
+                    if ($this->get_config('allowunsuspend')) {
+                        // Check if enrolment is suspended.
+                        foreach ($userenrolments as $userenrolment) {
+                            if ($userenrolment->enrolid == $instance->id) {
+                                if ($userenrolment->status == ENROL_USER_SUSPENDED) {
+                                    $this->update_user_enrol($instance, $user->id, ENROL_USER_ACTIVE);
+                                }
+                            }
+                        }
+                    }
+                    // Update user group enrolments.
                     $this->process_group($instance, $user);
                 }
             }
@@ -715,7 +753,7 @@ class enrol_autoenrol_plugin extends enrol_plugin {
         if ($this->get_config('removegroups')) {
             require_once($CFG->dirroot . '/group/lib.php');
 
-            $groups = $DB->get_records_sql('SELECT * FROM {groups} WHERE "courseid" = :courseid AND ' .
+            $groups = $DB->get_records_sql('SELECT * FROM {groups} WHERE courseid = :courseid AND ' .
                     $DB->sql_like('idnumber', ':idnumber'),
                     ['idnumber' => 'autoenrol|' . $instance->id . '|%', 'courseid' => $instance->courseid]);
 
@@ -1231,7 +1269,7 @@ class enrol_autoenrol_plugin extends enrol_plugin {
 
         $validstatus = array_keys($this->get_status_options());
         $context = context_course::instance($instance->courseid);
-        $validroles = array_keys($this->extend_assignable_roles($context, $data['roleid']));
+        $validroles = array_keys($this->extend_assignable_roles($context, $instance->roleid));
         $validexpirynotify = array_keys($this->get_expirynotify_options());
         $validenrolmethod = array_keys($this->get_enrolmethod_options());
         $validlongtimenosee = array_keys($this->get_longtimenosee_options());
@@ -1382,10 +1420,10 @@ class enrol_autoenrol_plugin extends enrol_plugin {
     /**
      * Add new instance of enrol plugin.
      * @param object $course
-     * @param array $fields instance fields
+     * @param ?array $fields instance fields
      * @return int id of new instance, null if can not be created
      */
-    public function add_instance($course, array $fields = null) {
+    public function add_instance($course, ?array $fields = null) {
         if (!empty($fields)) {
             // In the form we are representing 2 db columns with one field.
             if (!empty($fields['expirynotify'])) {

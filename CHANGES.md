@@ -2,6 +2,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Changed
+- Updated strings to match self enrolment
+
+## [2.4.1] - 2025-03-14
+### Fixed
+- Fixed a typo - Thanks to Simon Coggins
+- Fix #54 Added Edit enrolment link in participants lisst by [Djarran Cotleanu|https://github.com/djarran]
 
 ## [2.4.0] - 2024-02-19
 ### Fixed
